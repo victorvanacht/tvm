@@ -115,6 +115,7 @@ def deploy() {
               returnStdout: true,
             ).trim()
             def tag = "${date_Ymd_HMS}-${upstream_revision.substring(0, 8)}"
+            init_git()
             {% for image in images %}
             update_docker(built_{{ image.name }}, "tlcpackstaging/{{ image.name }}:${tag}")
             {% endfor %}
@@ -139,6 +140,7 @@ def deploy() {
                 script: 'echo $TLCPACK_TOKEN | docker login --username octomldriazati --password-stdin',
                 label: 'Log in to Docker Hub'
               )
+              init_git()
               {% for image in images %}
               if ({{ image.name }}.contains("tlcpackstaging")) {
                 // Push image to tlcpack

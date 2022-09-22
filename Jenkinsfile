@@ -45,7 +45,7 @@
 // 'python3 jenkins/generate.py'
 // Note: This timestamp is here to ensure that updates to the Jenkinsfile are
 // always rebased on main before merging:
-// Generated at 2022-09-16T08:47:49.743918
+// Generated at 2022-09-22T14:23:18.544698
 
 import org.jenkinsci.plugins.pipeline.modeldefinition.Utils
 // NOTE: these lines are scanned by docker/dev_common.sh. Please update the regex as needed. -->
@@ -4262,6 +4262,7 @@ def deploy() {
                         returnStdout: true,
                       ).trim()
                       def tag = "${date_Ymd_HMS}-${upstream_revision.substring(0, 8)}"
+                      init_git()
                       update_docker(built_ci_arm, "tlcpackstaging/ci_arm:${tag}")
                       update_docker(built_ci_cortexm, "tlcpackstaging/ci_cortexm:${tag}")
                       update_docker(built_ci_cpu, "tlcpackstaging/ci_cpu:${tag}")
@@ -4299,6 +4300,7 @@ def deploy() {
                           script: 'echo $TLCPACK_TOKEN | docker login --username octomldriazati --password-stdin',
                           label: 'Log in to Docker Hub'
                         )
+                        init_git()
                         if (ci_arm.contains("tlcpackstaging")) {
                           // Push image to tlcpack
                           def tag = ci_arm.split(":")[1]
