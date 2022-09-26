@@ -395,8 +395,24 @@ void CodeGenCUDA::PrintType(DataType t, std::ostream& os) {  // NOLINT(*)
       os << lanes;
       return;
     }
+  } else if (t.code() >= DataType::TypeCode::kCustomBegin) { // TODO: should this be >= or > ??
+    // we have to handle a custom datatype!
+    // custom datatypes are passed on as uintNN_t of suitable size.
+    if (!t.is_scalar()) {
+      LOG(FATAL) << "Custom datatype" << t << "with multiple lanes not supported";
+    }
+    if (t.bits()>64) {
+      LOG(FATAL) << "Custom datatype " << t << " wider than 64 bits not supported";
+    } 
+    std::string type = "uchar";
+    if (t.bits()>8) type = "ushort";
+    if (t.bits()>16) type = "uint";
+    if (t.bits()>32) type = "uint64_t";
+    os  << type;
+    //LOG(FATAL) << "Force run time error";
+    return;
   }
-  LOG(FATAL) << "Cannot convert type " << t << " to CUDA type";
+  LOG(FATAL) << "ICannot convert type " << t << " (" << t.code()<<") to CUDA type";
 }
 
 void CodeGenCUDA::PrintVecBinaryOp(const std::string& op, DataType t, PrimExpr lhs, PrimExpr rhs,

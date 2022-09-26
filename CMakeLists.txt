@@ -11,6 +11,12 @@ include(cmake/utils/FindLLVM.cmake)
 include(cmake/utils/FindROCM.cmake)
 include(cmake/utils/FindEthosN.cmake)
 
+
+
+find_package( OpenCV REQUIRED )
+include_directories( ${OpenCV_INCLUDE_DIRS} )
+
+
 if(EXISTS ${CMAKE_CURRENT_BINARY_DIR}/config.cmake)
   include(${CMAKE_CURRENT_BINARY_DIR}/config.cmake)
 else()
@@ -311,6 +317,7 @@ list(APPEND COMPILER_SRCS ${RELAY_QNN_SRCS})
 tvm_file_glob(GLOB DATATYPE_SRCS src/target/datatype/*.cc)
 list(APPEND COMPILER_SRCS ${DATATYPE_SRCS})
 list(APPEND COMPILER_SRCS "src/target/datatype/myfloat/myfloat.cc")
+list(APPEND COMPILER_SRCS "src/target/datatype/complex/complex.cc")
 
 tvm_file_glob(GLOB RUNTIME_SRCS
   src/runtime/*.cc
@@ -583,6 +590,11 @@ if(USE_THREADS AND NOT BUILD_FOR_HEXAGON)
   target_link_libraries(tvm PUBLIC Threads::Threads)
   target_link_libraries(tvm_runtime PUBLIC Threads::Threads)
 endif()
+
+
+list(APPEND TVM_RUNTIME_LINKER_LIBS ${OpenCV_LIBS})
+
+
 
 target_link_libraries(tvm PRIVATE ${TVM_LINKER_LIBS} ${TVM_RUNTIME_LINKER_LIBS})
 target_link_libraries(tvm_runtime PRIVATE ${TVM_RUNTIME_LINKER_LIBS})

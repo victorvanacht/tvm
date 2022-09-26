@@ -422,7 +422,7 @@ class GraphProto(object):
         self._tensor_array_shapes = {}
         self._tensor_array_shape_nodes = {}
 
-    def _get_relay_func(self, graph, layout="NHWC", shape=None, outputs=None):
+    def _get_relay_func(self, graph, layout="NHWC", shape=None, outputs=None, dtypes={}):
         """Construct relay nodes from tensorflow graph definition - GraphDef.
 
         Follow the tensorflow graph definition to parse and convert it to Relay.
@@ -451,6 +451,9 @@ class GraphProto(object):
 
         outputs : List of output tensor names (Optional)
             if not specified then the last node is assumed as graph output.
+
+        dtypes  : Dictionary of tensorflow typenames to be replaced by TVM typenames.
+            example: {"complex64" : "custom[cmpl]64"}
 
         Returns
         -------
@@ -516,14 +519,23 @@ class GraphProto(object):
 
                 self._output_shapes[node.name] = [self._input_shapes[node.name]]
                 attr = self._parse_attr(node.attr)
+
+                dtype=attr["dtype"].name
+                if dtype in dtypes:
+                    dtype = dtypes[dtype]
+
                 self._nodes[node.name] = [
                     _expr.var(
-                        node.name, shape=self._input_shapes[node.name], dtype=attr["dtype"].name
+                        node.name, shape=self._input_shapes[node.name], dtype=dtype
                     )
                 ]
 
                 # Ignore user's input shape for Non placeholder
             elif node.op == "Const":
+
+                #@@@@@@@ Here is the problem --> the tensorflow parser does not do const (like zeros and const) operators with datatype correctly.
+                #@@@@@@@ And also the cast operator needs some attention maybe?!?1?
+
                 tensor_value = node.attr["value"].tensor
                 self._input_shapes[node.name] = tensor_util.TensorShapeProtoToList(
                     tensor_value.tensor_shape
@@ -616,11 +628,11 @@ class GraphProto(object):
             self._sorted_cf_node_names.append(node.name)
 
         for node in sorted_cf_nodes:
-            self._backtrack_construct(node.name)
+            self._backtrack_construct(node.name, dtypes)
 
         # Second, parse other nodes to re-create TF graph using Relay operators.
         for node in graph.node:
-            self._backtrack_construct(node.name)
+            self._backtrack_construct(node.name, dtypes)
 
         out = []
         if outputs is None:
@@ -652,11 +664,11 @@ class GraphProto(object):
         self._params = final_params
         return func
 
-    def from_tensorflow(self, graph, layout="NHWC", shape=None, outputs=None):
+    def from_tensorflow(self, graph, layout="NHWC", shape=None, outputs=None, dtypes={}):
         """Wrapper to _get_relay_func which converts Tensorflow graph to Relay function
         which is used as main function for the Relay module
         """
-        func = self._get_relay_func(graph, layout=layout, shape=shape, outputs=outputs)
+        func = self._get_relay_func(graph, layout=layout, shape=shape, outputs=outputs, dtypes=dtypes)
         self._mod["main"] = func
         return self._mod, self._params
 
@@ -775,7 +787,7 @@ class GraphProto(object):
 
         return attrs
 
-    def _convert_control_flow_operator(self, node, inputs, attrs, control_flow_node_map):
+    def _convert_control_flow_operator(self, node, inputs, attrs, control_flow_node_map, dtypes={}):
         """
         Convert the Relay control flow primitive into corresponding component
         of a Relay control flow construct, i.e. `tf.cond` and `tf.while_loop`
@@ -805,7 +817,7 @@ class GraphProto(object):
         plname = find_parent_loop_name(node.name, self._while_loop_name_set)
         if node.op == "Merge":
             if _in_while_loop(self._control_flow_node_map, node_name_prefix):
-                op = self._licm_construct(plname, node.input[0])
+                op = self._licm_construct(plname, node.input[0], dtypes)
                 if node_name_prefix not in self._loops:
                     self._loops[node_name_prefix] = Loop(self._mod, plname, self._lvar2expr)
             else:
@@ -815,12 +827,12 @@ class GraphProto(object):
                     for i in range(merge_idx - 1, -1, -1):
                         cf_name = self._sorted_cf_node_names[i]
                         if cf_name.startswith(switch_prefix):
-                            self._backtrack_construct(cf_name)
+                            self._backtrack_construct(cf_name, dtypes)
                             break
 
                 branch = self._branches[node_name_prefix]
-                false_br = self._licm_construct(plname, node.input[0])
-                true_br = self._licm_construct(plname, node.input[1])
+                false_br = self._licm_construct(plname, node.input[0], dtypes)
+                true_br = self._licm_construct(plname, node.input[1], dtypes)
                 branch.true_branch = true_br
                 branch.false_branch = false_br
                 op = branch.if_node()
@@ -862,13 +874,13 @@ class GraphProto(object):
                     break
             op = _expr.TupleGetItem(expr, body_pos)
         elif node.op == "Enter":
-            op = self._licm_construct(plname, node.input[0])
+            op = self._licm_construct(plname, node.input[0], dtypes)
         elif node.op == "LoopCond":
-            op = self._licm_construct(plname, node.input[0])
+            op = self._licm_construct(plname, node.input[0], dtypes)
             self._loops[node_name_prefix].cond = op
         elif node.op == "Switch":
-            op = self._licm_construct(plname, node.input[0])
-            cond = self._licm_construct(plname, node.input[1])
+            op = self._licm_construct(plname, node.input[0], dtypes)
+            cond = self._licm_construct(plname, node.input[1], dtypes)
             if _in_while_loop(self._control_flow_node_map, node_name_prefix):
                 if node_name_prefix not in self._loop_var_order:
                     self._loop_var_order[node_name_prefix] = []
@@ -892,7 +904,7 @@ class GraphProto(object):
                 self._loop_body_order[node_name_prefix].append(
                     int(node.name.split("NextIteration_")[-1])
                 )
-            op = self._licm_construct(plname, node.input[0])
+            op = self._licm_construct(plname, node.input[0], dtypes)
             self._loops[node_name_prefix].body.append(op)
         else:
             raise Exception("Cannot identify control flow operator: " + "{}".format(node.op))
@@ -988,7 +1000,7 @@ class GraphProto(object):
         return ret
 
     def _convert_operator(
-        self, op_name, node_name, inputs, attrs, identity_list=None, convert_map=None
+        self, op_name, node_name, inputs, attrs, identity_list=None, convert_map=None, dtypes={}
     ):
         """Convert from Tensorflow operator to relay operator.
         The converter must specify conversions explicitly for incompatible name, and
@@ -1014,10 +1026,13 @@ class GraphProto(object):
         sym : relay.op
             Converted relay operator
         """
+
         identity_list = identity_list if identity_list else _identity_list
         convert_map = convert_map if convert_map else _convert_map
         if op_name in identity_list:
             sym = get_relay_op(op_name)(*inputs, **attrs)
+        elif (op_name=="Cast"):
+            sym = convert_map[op_name](inputs, attrs, self._params, self._mod, dtypes=dtypes)
         elif op_name in convert_map:
             if _need_prelude_for_shape_inference(op_name):
                 sym = convert_map[op_name](inputs, attrs, self._params, self._prelude)
@@ -1046,7 +1061,7 @@ class GraphProto(object):
                 sym = _expr.TupleWrapper(tuple_value, sym.size)
         return sym
 
-    def _licm_construct(self, loop_name, node_name):
+    def _licm_construct(self, loop_name, node_name, dtypes={}):
         """Construct a node by considering whether it is
         loop invariant with the given while loop. If yes, we
         generate a loop Variable. Otherwise, return regular
@@ -1065,7 +1080,7 @@ class GraphProto(object):
         out : relay.Expr or relay.Var
             Converted relay expression or loop var.
         """
-        actual_expr = self._backtrack_construct(node_name)
+        actual_expr = self._backtrack_construct(node_name, dtypes)
         tn = node_name.split(":")
         node_name = tn[0].split("^")[-1]
         cloop_name = find_parent_loop_name(node_name, self._while_loop_name_set)
@@ -1095,7 +1110,7 @@ class GraphProto(object):
 
         return ret
 
-    def _backtrack_construct(self, node_name):
+    def _backtrack_construct(self, node_name, dtypes={}):
         """Convert a specific tensorflow node to relay expression.
 
         If any of its ancestor node is not converted yet, backtrack as
@@ -1127,14 +1142,14 @@ class GraphProto(object):
             if node.op in _control_flow_nodes:
                 attr = self._parse_attr(node.attr)
                 op = self._convert_control_flow_operator(
-                    node, [], attr, self._control_flow_node_map
+                    node, [], attr, self._control_flow_node_map, dtypes
                 )
             else:
                 attr["_output_shapes"] = self._output_shapes[input_op_name]
                 attr["_node_name"] = node.name
                 attr["_target_layout"] = self._layout
 
-                inputs = [self._backtrack_construct(iname) for iname in node.input]
+                inputs = [self._backtrack_construct(iname, dtypes) for iname in node.input]
 
                 plname = find_parent_loop_name(node_name, self._while_loop_name_set)
 
@@ -1157,7 +1172,7 @@ class GraphProto(object):
                         name = shape_node.name
                         if output_index > 0:
                             name += ":" + str(output_index)
-                        converted = self._backtrack_construct(name)
+                        converted = self._backtrack_construct(name, dtypes)
                         shape = _infer_shape(converted, self._mod)
                         if wnode_op.startswith("TensorArraySplit"):
                             shape = (Any(),) + shape[1:]
@@ -1176,10 +1191,10 @@ class GraphProto(object):
                 # LICM
                 if plname in self._while_loop_name_set:
                     for i, iname in enumerate(node.input):
-                        actual_input = self._licm_construct(plname, iname)
+                        actual_input = self._licm_construct(plname, iname, dtypes)
                         inputs[i] = actual_input
 
-                op = self._convert_operator(node.op, node.name, inputs, attr)
+                op = self._convert_operator(node.op, node.name, inputs, attr, dtypes=dtypes)
             if isinstance(op, np.ndarray):
                 self._params[node.name] = tvm.nd.array(op)
                 op = [
@@ -1211,15 +1226,15 @@ class SubGraphProto(GraphProto):
         super().__init__()
         self._main_graph_proto = main_graph_proto  # holds main graph proto object
 
-    def from_tensorflow(self, graph, layout="NHWC", shape=None, outputs=None):
+    def from_tensorflow(self, graph, layout="NHWC", shape=None, outputs=None, dtypes={}):
         """Wrapper to _get_relay_func which converts Tensorflow graph to Relay function.
         Return Relay function and params
         """
-        func = self._get_relay_func(graph, layout=layout, shape=shape, outputs=outputs)
+        func = self._get_relay_func(graph, layout=layout, shape=shape, outputs=outputs, dtypes=dtypes)
         return func, self._params
 
 
-def from_tensorflow(graph, layout="NHWC", shape=None, outputs=None, convert_config=None):
+def from_tensorflow(graph, layout="NHWC", shape=None, outputs=None, convert_config=None, dtypes={}):
     """Load tensorflow graph which is a python tensorflow graph object into relay.
     The companion parameters will be handled automatically.
 
@@ -1247,6 +1262,9 @@ def from_tensorflow(graph, layout="NHWC", shape=None, outputs=None, convert_conf
                 True to convert `tf.batch_matmul` to `nn.batch_matmul` strict to NT format
                 (transpose_a=False, transpose_b=True).
 
+    dtypes : Dictionary of tensorflow types to be converted to TVM types
+        for example {"complex64" : "custom[cmpl]64"}
+
     Returns
     -------
     mod : tvm.IRModule
@@ -1260,5 +1278,5 @@ def from_tensorflow(graph, layout="NHWC", shape=None, outputs=None, convert_conf
         TF_DEFAULT_CONFIGS.update(convert_config)
 
     g = GraphProto()
-    mod, params = g.from_tensorflow(graph, layout, shape, outputs)
+    mod, params = g.from_tensorflow(graph, layout, shape, outputs, dtypes)
     return mod, params

@@ -39,9 +39,58 @@ class AutotvmGlobalScope(object):
 
 GLOBAL_SCOPE = AutotvmGlobalScope()
 
+import tvm
 
 def reset_global_scope(global_scope):
     """Reset global autotvm state. This is needed to initialize PopenPool workers."""
     global GLOBAL_SCOPE
     GLOBAL_SCOPE.deep_copy(global_scope)
     AutotvmGlobalScope.current = global_scope
+
+     # Defition of the custom datatype and a few operators
+    tvm.target.datatype.register("cmpl", 150)
+    tvm.target.datatype.register_op(
+        tvm.target.datatype.create_lower_func({(32, 64): "Float32ToComplex64"}),
+        "Cast",
+        "llvm",
+        "float",
+        "cmpl",
+    )
+    tvm.target.datatype.register_op(
+        tvm.target.datatype.create_lower_func({64: "Complex64Add"}),
+        "Add",
+        "llvm",
+        "cmpl",
+    )
+    tvm.target.datatype.register_op(
+        tvm.target.datatype.create_lower_func({64: "Complex64Sub"}),
+        "Sub",
+        "llvm",
+        "cmpl",
+    )
+    tvm.target.datatype.register_op(
+        tvm.target.datatype.create_lower_func({64: "Complex64Mul"}),
+        "Mul",
+        "llvm",
+        "cmpl",
+    )
+    tvm.target.datatype.register_op(
+        tvm.target.datatype.create_lower_func({64: "Complex64Div"}),
+        "Div",
+        "llvm",
+        "cmpl",
+    )
+    tvm.target.datatype.register_op(
+        tvm.target.datatype.lower_call_pure_extern,
+        "Call",
+        "llvm",
+        "cmpl",
+        intrinsic_name="tir.call_pure_extern",
+    )
+    tvm.target.datatype.register_op(
+        tvm.target.datatype.create_lower_func({(64, 32): "Complex64ToFloat32"}),
+        "Cast",
+        "llvm",
+        "cmpl",
+        "float",
+    )

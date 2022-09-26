@@ -1040,9 +1040,12 @@ def _crop_and_resize():
 
 
 def _cast():
-    def _impl(inputs, attr, params, mod):
-        return inputs[0].astype(attr["DstT"].name)
-
+    def _impl(inputs, attr, params, mod, dtypes):
+        if (attr["DstT"].name in dtypes):
+            return inputs[0].astype(dtypes[attr["DstT"].name])
+        else:
+            return inputs[0].astype(attr["DstT"].name)
+  
     return _impl
 
 
@@ -2858,6 +2861,43 @@ def _unique(return_counts=True):
 
     return _impl
 
+def _conj():
+    def _impl(inputs, attr, params, mod):
+        #_res = tvm.relay.op._make.conj(inputs[0], "custom[cmpl]64")
+        #_res = tvm.relay.op._make.conj(inputs[0])
+        _res = tvm.relay.op._make.conjcv(inputs[0])
+        return _res
+
+    return _impl
+
+def _fft():
+    def _impl(inputs, attr, params, mod):
+        _res = tvm.relay.op._make.fft(inputs[0])
+        return _res
+
+    return _impl
+
+def _ifft():
+    def _impl(inputs, attr, params, mod):
+        _res = tvm.relay.op._make.ifft(inputs[0])
+        return _res
+
+    return _impl
+
+def _fft2d():
+    def _impl(inputs, attr, params, mod):
+        _res = tvm.relay.op._make.fft2d(inputs[0])
+        return _res
+
+    return _impl
+
+def _ifft2d():
+    def _impl(inputs, attr, params, mod):
+        _res = tvm.relay.op._make.ifft2d(inputs[0])
+        return _res
+
+    return _impl    
+
 
 # _convert_map defines maps of name to converter functor(callable)
 # for 1 to 1 mapping, use Renamer if nothing but name is different
@@ -2896,6 +2936,7 @@ _convert_map = {
     "ClipByValue": _clip_by_value(),
     "Concat": _concat(),
     "ConcatV2": _concatV2(),
+    "Conj": _conj(),
     "Conv2D": _conv("conv"),
     "Conv2DBackpropInput": _conv("conv_transpose"),
     "Conv3D": _conv3d("conv"),
@@ -2914,6 +2955,10 @@ _convert_map = {
     "Exp": AttrCvt("exp"),
     "ExpandDims": _expand_dims(),
     "Expm1": _expm1(),
+    "FFT": _fft(),
+    "IFFT": _ifft(),
+    "FFT2D": _fft2d(),
+    "IFFT2D": _ifft2d(),
     "Fill": _fill(),
     "Floor": AttrCvt("floor"),
     "FloorDiv": _floordiv(),

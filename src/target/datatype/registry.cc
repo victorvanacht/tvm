@@ -57,7 +57,7 @@ void Registry::Register(const std::string& type_name, uint8_t type_code) {
 
 uint8_t Registry::GetTypeCode(const std::string& type_name) {
   ICHECK(name_to_code_.find(type_name) != name_to_code_.end())
-      << "Type name " << type_name << " not registered";
+            << "Type name " << type_name << " not registered. Elements in type registration list: " << name_to_code_.size();
   return name_to_code_[type_name];
 }
 
